@@ -1,0 +1,51 @@
+name: 3ibot upstream sync
+
+on:
+  schedule:
+    - cron: '23 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  propose-update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Fetch Corey Haines upstream
+        run: |
+          git remote add upstream https://github.com/coreyhaines31/marketingskills.git || true
+          git fetch upstream main
+          git merge-base --is-ancestor upstream/main HEAD && exit 0 || true
+      - name: Create a review branch
+        id: sync
+        run: |
+          if git merge-base --is-ancestor upstream/main HEAD; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          branch="3ibot/upstream-${{ github.run_id }}"
+          git checkout -b "$branch"
+          git config user.name "3ibot Sync"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if ! git merge --no-ff --no-edit upstream/main; then
+            git merge --abort
+            echo "conflict=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git push origin "$branch"
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+      - name: Open review pull request
+        if: steps.sync.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh pr create --base main --head "${{ steps.sync.outputs.branch }}" --title "chore: review upstream marketingskills update" --body "This proposed update was pulled from Corey Haines's upstream repository. Review it before merging so 3ibot-specific changes remain intentional."
+      - name: Report merge conflict
+        if: steps.sync.outputs.conflict == 'true'
+        run: echo "Upstream changes conflict with this fork and need a manual review."
